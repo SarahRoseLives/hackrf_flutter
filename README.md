@@ -6,199 +6,227 @@ Ideal for mobile SDR (Software Defined Radio) applications, remote-control trans
 
 ---
 
-## Features
+# HackRF Flutter Plugin: Function Guide
 
-- **Automatic Device Discovery:** Detects HackRF devices and requests required USB permissions.
-- **Device Information:** Retrieve the board ID of the connected HackRF.
-- **Transmission Control:**
-  - Set transmission frequency (`setFrequency`)
-  - Set sample rate (`setSampleRate`)
-  - Set TX VGA (IF) gain (`setTxVgaGain`)
-  - Start and stop transmission (`startTx`, `stopTx`)
-- **Data Streaming:** Send I/Q data (`Uint8List` buffers) to HackRF for direct transmission.
+This guide provides a practical, end-user overview of all available functions in the `hackrf_flutter` plugin and how to use them in your Flutter app.  
+**All functions are asynchronous (`Future`) for easy integration with modern Flutter code.**
 
 ---
 
-## Requirements
+## 1. Initialization & Device Info
 
-### Hardware
+You **must initialize** the device before calling any other function.
 
-- **HackRF One** (or compatible device, e.g., Rad1o)
-- **Android device** with USB OTG support
-- **USB OTG cable/adapter** to connect HackRF
+### `init()`
 
-### Software
+Finds the connected HackRF, requests USB permissions, and prepares the device for use.
 
-- **Android only:** Uses native Android libraries (no iOS support)
-- **Minimum Android SDK version:** `minSdkVersion` **21** or higher
-
----
-
-## Installation
-
-### 1. Add the Dependency
-
-Add to your `pubspec.yaml`:
-
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  hackrf_flutter:
-    path: ../hackrf_flutter  # Adjust path to your plugin location if necessary
-```
-
-Run:
-
-```sh
-flutter pub get
-```
-
-### 2. Android Configuration (**Required!**)
-
-#### A. Update `minSdkVersion`
-
-In `android/app/build.gradle`:
-
-```groovy
-android {
-    defaultConfig {
-        minSdkVersion 21
-        // ...other config...
-    }
-}
-```
-
-#### B. Custom `MainActivity` for Plugin Registration
-
-Create `android/app/src/main/kotlin/com/yourcompany/yourapp/MainActivity.kt` (adjust package name):
-
-```kotlin
-package com.yourcompany.yourapp // Change to your actual package name
-
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import com.sarahroselives.hackrf_flutter.HackrfFlutterPlugin // Import your plugin
-
-class MainActivity: FlutterActivity() {
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        // Register plugin
-        flutterEngine.plugins.add(HackrfFlutterPlugin())
-    }
-}
-```
-
-#### C. Update `AndroidManifest.xml`
-
-Ensure your manifest points to your new `MainActivity`:
-
-```xml
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application ...>
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            ...>
-            <!-- ...your intent filters... -->
-        </activity>
-        <!-- ... -->
-    </application>
-</manifest>
-```
-
----
-
-## Usage Example
-
-Here's a basic example that initializes HackRF and starts transmission:
+- **Returns:** `Future<bool>` (true if successful, false otherwise)
 
 ```dart
-import 'package:flutter/material.dart';
-import 'dart:typed_data';
-import 'dart:math';
 import 'package:hackrf_flutter/hackrf_flutter.dart';
 
-class RadioScreen extends StatefulWidget {
-  const RadioScreen({super.key});
+final _hackrf = HackrfFlutter();
 
-  @override
-  State<RadioScreen> createState() => _RadioScreenState();
-}
-
-class _RadioScreenState extends State<RadioScreen> {
-  final _hackrf = HackrfFlutter();
-  bool _isInitialized = false;
-  bool _isTransmitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    initDevice();
-  }
-
-  Future<void> initDevice() async {
-    try {
-      bool? success = await _hackrf.init();
-      if (success ?? false) {
-        setState(() => _isInitialized = true);
-        print("HackRF Initialized!");
-        int? boardId = await _hackrf.getBoardId();
-        print("Board ID: $boardId");
-      } else {
-        print("Failed to initialize HackRF. Is it connected?");
-      }
-    } catch (e) {
-      print("Error initializing HackRF: $e");
-    }
-  }
-
-  Future<void> startTransmission() async {
-    if (!_isInitialized) return;
-
-    // Generate I/Q data (262,144 bytes)
-    const packetSize = 262144;
-    final iqData = Int8List(packetSize);
-    for (int i = 0; i < packetSize; i += 2) {
-      final angle = 2 * pi * (i / 2) / 100.0;
-      iqData[i] = (sin(angle) * 127).round();   // I
-      iqData[i + 1] = (cos(angle) * 127).round(); // Q
-    }
-
-    try {
-      await _hackrf.setFrequency(433920000); // 433.92 MHz
-      await _hackrf.setSampleRate(8000000);   // 8 MSPS
-      await _hackrf.setTxVgaGain(30);         // 30 dB (0–47)
-      await _hackrf.startTx();
-      setState(() => _isTransmitting = true);
-      print("TRANSMITTING...");
-      while (_isTransmitting) {
-        await _hackrf.sendData(iqData.buffer.asUint8List());
-      }
-    } catch (e) {
-      print("Transmission error: $e");
-    }
-  }
-
-  Future<void> stopTransmission() async {
-    setState(() => _isTransmitting = false); // Breaks loop
-    await _hackrf.stopTx();
-    print("Transmission stopped.");
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: ElevatedButton(
-          onPressed: _isTransmitting ? stopTransmission : startTransmission,
-          child: Text(_isTransmitting ? 'Stop Transmit' : 'Start Transmit'),
-        ),
-      ),
-    );
+Future<void> connectToDevice() async {
+  bool isReady = await _hackrf.init();
+  if (isReady) {
+    print("HackRF is connected and ready.");
+  } else {
+    print("Could not find or connect to HackRF.");
   }
 }
 ```
+
+### `getBoardId()`
+
+Retrieves the board ID of the connected HackRF.
+
+- **Returns:** `Future<int?>` (board ID, or null if not found)
+
+```dart
+int? boardId = await _hackrf.getBoardId();
+print("Device Board ID: $boardId"); // e.g., 2 for HackRF One
+```
+
+---
+
+## 2. Common Radio Configuration
+
+Configure parameters used by both transmitter and receiver.
+
+### `setFrequency(int freqHz)`
+
+Sets the center frequency of the HackRF.
+
+- **freqHz:** Frequency in Hertz (e.g., `145100000` for 145.1 MHz)
+- **Returns:** `Future<bool>` (true on success)
+
+```dart
+await _hackrf.setFrequency(145100000);
+```
+
+### `setSampleRate(int rateHz)`
+
+Sets the sample rate.
+
+- **rateHz:** Sample rate in Hertz (e.g., `8000000` for 8 MSPS)
+- **Returns:** `Future<bool>` (true on success)
+
+```dart
+await _hackrf.setSampleRate(8000000);
+```
+
+---
+
+## 3. Transmission (TX) Functions
+
+Functions for transmitting signals.
+
+### `setTxVgaGain(int gain)`
+
+Sets the transmit VGA (baseband) gain.
+
+- **gain:** Integer from `0` to `47`
+- **Returns:** `Future<bool>` (true on success)
+
+```dart
+await _hackrf.setTxVgaGain(30); // Set gain to 30
+```
+
+### `startTx()`
+
+Puts the HackRF into transmit mode.  
+After calling this, you can begin sending data.
+
+- **Returns:** `Future<bool>` (true on success)
+
+### `stopTx()`
+
+Takes the HackRF out of transmit mode.
+
+- **Returns:** `Future<bool>` (true on success)
+
+### `sendData(Uint8List data)`
+
+Sends a packet of I/Q data to the HackRF's transmit queue.
+
+- **data:** A `Uint8List` containing interleaved 8-bit I/Q samples.
+- **NOTE:** The native library expects a specific packet size of **262,144 bytes**.
+
+```dart
+// Create a buffer of the required size
+const packetSize = 262144;
+final iqData = Uint8List(packetSize);
+
+// ... fill iqData with your signal ...
+
+await _hackrf.startTx();
+await _hackrf.sendData(iqData); // Send the packet
+await _hackrf.stopTx();
+```
+
+---
+
+## 4. Receiving (RX) Functions
+
+Functions for receiving signals.
+
+### `setRxLnaGain(int gain)`
+
+Sets the receive LNA (low-noise amplifier / RF) gain.
+
+- **gain:** Integer from `0` to `40`, in steps of 8 (i.e., `0`, `8`, `16`, `24`, `32`, `40`)
+- **Returns:** `Future<bool>` (true on success)
+
+```dart
+await _hackrf.setRxLnaGain(32);
+```
+
+### `setRxVgaGain(int gain)`
+
+Sets the receive VGA (baseband) gain.
+
+- **gain:** Integer from `0` to `62`, in steps of 2
+- **Returns:** `Future<bool>` (true on success)
+
+```dart
+await _hackrf.setRxVgaGain(20);
+```
+
+### `startRx()`
+
+Begins listening for incoming I/Q data from the HackRF.  
+The hardware starts when you subscribe to the returned stream.
+
+- **Returns:** `Stream<Uint8List>` (emits packets of I/Q data)
+
+### `stopRx()`
+
+Stops the receiver.  
+Usually handled automatically when you cancel the stream subscription, but you can call for safety.
+
+- **Returns:** `Future<bool>` (true on success)
+
+---
+
+### Example: Listening to RX Data
+
+```dart
+StreamSubscription<Uint8List>? rxSubscription;
+
+Future<void> startListening() async {
+  // 1. Configure the radio for receiving
+  await _hackrf.setFrequency(101100000); // 101.1 MHz FM
+  await _hackrf.setSampleRate(2000000);
+  await _hackrf.setRxLnaGain(24);
+  await _hackrf.setRxVgaGain(20);
+
+  // 2. Get the stream and subscribe to it
+  final rxStream = _hackrf.startRx();
+  rxSubscription = rxStream.listen(
+    (data) {
+      print("Received a packet with ${data.length} bytes.");
+      // ... process your I/Q data here ...
+    },
+    onError: (e) {
+      print("An error occurred in the RX stream: $e");
+    },
+    onDone: () {
+      print("The RX stream is finished.");
+    }
+  );
+}
+
+void stopListening() {
+  // 3. To stop receiving, just cancel the subscription
+  rxSubscription?.cancel();
+  print("Stopped listening.");
+}
+```
+
+---
+
+## Quick Reference
+
+| Function               | Purpose                                     | Returns         |
+|------------------------|---------------------------------------------|-----------------|
+| `init()`               | Initialize device, request USB              | `Future<bool>`  |
+| `getBoardId()`         | Get HackRF board ID                         | `Future<int?>`  |
+| `setFrequency()`       | Set center frequency (Hz)                   | `Future<bool>`  |
+| `setSampleRate()`      | Set sample rate (Hz)                        | `Future<bool>`  |
+| `setTxVgaGain()`       | Set transmit VGA gain                       | `Future<bool>`  |
+| `startTx()`            | Start transmission                          | `Future<bool>`  |
+| `stopTx()`             | Stop transmission                           | `Future<bool>`  |
+| `sendData()`           | Send I/Q data (Uint8List, 262,144 bytes)    | `Future<bool>`  |
+| `setRxLnaGain()`       | Set RX LNA gain                             | `Future<bool>`  |
+| `setRxVgaGain()`       | Set RX VGA gain                             | `Future<bool>`  |
+| `startRx()`            | Start RX, returns stream of I/Q data        | `Stream<Uint8List>` |
+| `stopRx()`             | Stop RX                                     | `Future<bool>`  |
+
+---
+
+**Tip:** Always check the return value of any function for error handling in your app.
 
 ---
 
