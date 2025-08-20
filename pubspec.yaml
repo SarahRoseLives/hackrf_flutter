@@ -1,11 +1,10 @@
 name: hackrf_flutter
 description: "A Flutter plugin for interfacing with HackRF devices. Supports Android platform."
-version: 0.0.1
+version: 0.0.2
 homepage: https://github.com/SarahRoseLives/hackrf_flutter
 repository: https://github.com/SarahRoseLives/hackrf_flutter
 issue_tracker: https://github.com/SarahRoseLives/hackrf_flutter/issues
 documentation: https://github.com/SarahRoseLives/hackrf_flutter#readme
-publish_to: "https://pub.dev"
 
 environment:
   sdk: ^3.8.1
