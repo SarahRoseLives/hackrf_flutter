@@ -6,32 +6,28 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import java.util.concurrent.ArrayBlockingQueue
+import kotlin.concurrent.thread
 
-// Import the required classes from your AAR file
 import com.mantz_it.hackrf_android.Hackrf
 import com.mantz_it.hackrf_android.HackrfCallbackInterface
 
-/** HackrfFlutterPlugin */
 class HackrfFlutterPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var channel: MethodChannel
     private var pluginBinding: FlutterPlugin.FlutterPluginBinding? = null
     private var hackrf: Hackrf? = null
-
-    // This variable will hold the Flutter result callback while we wait for the native library
     private var pendingInitResult: Result? = null
+    private var txQueue: ArrayBlockingQueue<ByteArray>? = null
+    private var isTransmitting = false
 
-    // This callback structure correctly matches your HackrfCallbackInterface.java
     private val hackrfCallback = object : HackrfCallbackInterface {
         override fun onHackrfReady(hackrfInstance: Hackrf) {
-            // The library is ready! It gave us the Hackrf instance.
             this@HackrfFlutterPlugin.hackrf = hackrfInstance
-            // Signal success back to Flutter
             pendingInitResult?.success(true)
             pendingInitResult = null
         }
 
         override fun onHackrfError(message: String) {
-            // The library failed to connect. Send an error back to Flutter.
             pendingInitResult?.error("HACKRF_ERROR", message, null)
             pendingInitResult = null
         }
@@ -44,50 +40,73 @@ class HackrfFlutterPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
-        when (call.method) {
-            "init" -> {
-                if (pendingInitResult != null) {
-                    result.error("ALREADY_INITIALIZING", "An initialization process is already underway.", null)
-                    return
+        // Run hardware calls on a background thread to not block the UI
+        thread(start = true) {
+            try {
+                when (call.method) {
+                    "init" -> {
+                        if (pendingInitResult != null) {
+                            result.error("ALREADY_INITIALIZING", "An initialization process is already underway.", null)
+                            return@thread
+                        }
+                        pendingInitResult = result
+                        val context = pluginBinding?.applicationContext ?: run {
+                            result.error("CONTEXT_UNAVAILABLE", "Android context is not available.", null)
+                            return@thread
+                        }
+                        Hackrf.initHackrf(context, hackrfCallback, 10)
+                    }
+                    "getBoardId" -> {
+                        val boardId = hackrf?.boardID
+                        result.success(boardId?.toInt())
+                    }
+                    "setFrequency" -> {
+                        val freq = call.argument<Int>("freq")?.toLong() ?: 0L
+                        val success = hackrf?.setFrequency(freq)
+                        result.success(success)
+                    }
+                    "setSampleRate" -> {
+                        val rate = call.argument<Int>("rate") ?: 0
+                        // For NTSC, a sample rate of 10 MSPS is common. Divider is 1 for that.
+                        val success = hackrf?.setSampleRate(rate, 1)
+                        result.success(success)
+                    }
+                    "setTxVgaGain" -> {
+                        val gain = call.argument<Int>("gain") ?: 0
+                        val success = hackrf?.setTxVGAGain(gain)
+                        result.success(success)
+                    }
+                    "startTx" -> {
+                        txQueue = hackrf?.startTX()
+                        isTransmitting = (txQueue != null)
+                        result.success(isTransmitting)
+                    }
+                    "stopTx" -> {
+                        hackrf?.stop()
+                        isTransmitting = false
+                        txQueue = null
+                        result.success(true)
+                    }
+                    "sendData" -> {
+                        val data = call.argument<ByteArray>("data")
+                        if (isTransmitting && data != null) {
+                            txQueue?.put(data)
+                            result.success(null)
+                        } else {
+                            result.error("TX_ERROR", "Not transmitting or data is null.", null)
+                        }
+                    }
+                    else -> result.notImplemented()
                 }
-                pendingInitResult = result
-                val context = pluginBinding?.applicationContext
-                if (context == null) {
-                    result.error("CONTEXT_UNAVAILABLE", "Android context is not available.", null)
-                    return
-                }
-
-                try {
-                    // CORRECT: Call the static 'initHackrf' method to start the process.
-                    // Using a default queue size of 10.
-                    Hackrf.initHackrf(context, hackrfCallback, 10)
-                } catch (e: Exception) {
-                    pendingInitResult?.error("INIT_ERROR", "Failed to call static Hackrf.initHackrf()", e.message)
-                    pendingInitResult = null
-                }
-            }
-            "getBoardId" -> {
-                if (hackrf == null) {
-                    result.error("NOT_INITIALIZED", "Hackrf is not initialized. Call init() first.", null)
-                    return
-                }
-                try {
-                    // CORRECT: Call the instance 'getBoardID()' method.
-                    val boardId = hackrf?.boardID
-                    // Convert the byte to an Int for Dart, as it's easier to work with.
-                    result.success(boardId?.toInt())
-                } catch (e: Exception) {
-                    result.error("BOARD_ID_ERROR", "Failed to get board ID", e.message)
-                }
-            }
-            else -> {
-                result.notImplemented()
+            } catch (e: Exception) {
+                result.error("NATIVE_ERROR", e.message, e.stackTraceToString())
             }
         }
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        hackrf?.stop()
         hackrf = null
         pluginBinding = null
         pendingInitResult = null
